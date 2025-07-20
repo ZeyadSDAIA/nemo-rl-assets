@@ -126,6 +126,8 @@ DP_SHARDING_STRATEGY="optim_grads_params" # Data parallel sharding strategy (opt
 # ==== Logic argument for data format fitting ====
 DATASET_TYPE=$OPENAI_DATASET # Options: prompt_response_dataset, openai_format, open_assistant, openmathinstruct2
 
+# ==================================== Running script DO NOT TOUCH ====================================
+
 # ==== Prepare data splitting for training and validation ====
 # Exit immediately on error
 set -e
