@@ -197,8 +197,7 @@ def main():
         with open(chat_template_path, "r", encoding="utf-8") as f:
             tokenizer.chat_template = f.read()
             print(f"✅ Loaded chat template from: {chat_template_path}")
-
-
+            
     # setup data
     (
         dataset,
