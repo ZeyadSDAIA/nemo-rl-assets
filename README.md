@@ -13,6 +13,7 @@ It is meant to be used alongside the main NeMo-RL project to ensure a reproducib
 ├── assets/
 │   ├── run_sft.bash           # Bash launcher for NeMo-RL SFT
 │   ├── run_sft.py             # Custom training entry point
+│   └── sft.yaml               # SFT config
 │   └── split_dataset.py       # Utility for train/val dataset splitting
 └── README.md
 ```
