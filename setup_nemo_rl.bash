@@ -26,10 +26,3 @@ cp nemo-rl-assets/assets/run_sft.bash .
 # ========== 5. Delete Assets Repo ==========
 echo "🗑️  Cleaning up assets repository..."
 rm -rf nemo-rl-assets
-
-# ========== 6. Success Message ==========
-echo "🎉 NeMo-RL setup complete! You can now run the SFT script with: "bash run_sft.bash" "
-echo "👋 Goodbye! Deleting self..."
-cd ..
-rm -- test_bash.bash
-
