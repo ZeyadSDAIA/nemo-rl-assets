@@ -6,14 +6,6 @@ It is meant to be used alongside the main NeMo-RL project to ensure a **reproduc
 
 ---
 
-## ⚙️ One-Click Setup
-
-Use the included setup script to clone, configure, and initialize NeMo-RL with all assets:
-
-```bash
-bash setup_nemo_rl.bash
-```
-
 ## 📂 Directory Structure
 
 ```
@@ -23,7 +15,6 @@ bash setup_nemo_rl.bash
 │   ├── run_sft.py             # Custom training entry point
 │   ├── sft.yaml               # SFT config
 │   └── split_dataset.py       # Utility for train/val dataset splitting
-├── setup_nemo_rl.bash         # Full automation script
 └── README.md
 ```
 
@@ -43,6 +34,3 @@ bash setup_nemo_rl.bash
 > **Type**: Python script  
 > **Purpose**: Splits a full dataset into training and validation sets in `.json` or `.jsonl` format.
 
-### `setup_nemo_rl.bash`
-> **Type**: Shell Script
-> **Purpose**: Automates NeMo-RL setup, dependency installation, and asset copying.
