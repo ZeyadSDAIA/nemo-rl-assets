@@ -1,0 +1,144 @@
+# SFT Algorithm Configuration
+sft:
+  ## total number of steps to train will equal
+  ## min((max_num_epochs * len(train_dataloader)), max_num_steps)
+  max_num_epochs: 1 # Max number of epochs to train over entire dataset
+  max_num_steps: 40 # Max number of steps to train over batches
+
+  val_period: 10 # Run validation after X steps
+  val_batches: 8 # Number of batches to use for validation
+  val_global_batch_size: 128 # Global batch size for validation
+  val_micro_batch_size: 1 # Number of batches per GPU
+  val_at_start: true # Run validation at the start of training
+  seed: 42 # Random seed for reproducibility
+
+checkpointing:
+  enabled: true # Enable checkpointing
+  checkpoint_dir: "results/sft" # Directory to save checkpoints
+  metric_name: "val_loss" # Metric to monitor for saving checkpoints
+  higher_is_better: false # Whether higher values of the metric are better
+  keep_top_k: 3 # Keep the top K checkpoints based on the monitored metric
+  save_period: 10 # Save checkpoints every X steps
+
+policy:
+  model_name: Qwen/Qwen3-0.6B # Name of the model to use
+  tokenizer:
+    name: ${policy.model_name} # Tokenizer name
+    chat_template: "/media/ExtremeSSD/models/models_chat_template/qwen2.5-0.5b-instruct_chat_template.txt"
+
+
+  train_global_batch_size: 128 # Total training batch size
+  train_micro_batch_size: 4 # Training batch size per GPU
+  max_total_sequence_length: 1024 # Maximum sequence length for tokenized inputs
+  precision: "bfloat16" # Numerical precision for training
+  fsdp_offload_enabled: false # Whether to enable CPU offloading for FDSP
+  activation_checkpointing_enabled: false # Whether to checkpoint activations to save memory
+
+  dtensor_cfg:
+    enabled: true # Enable Dtensor for distributed training
+    cpu_offload: false # Whether to offload to CPU memory
+    sequence_parallel: false # Splits sequence dimension for parallelism
+    activation_checkpointing: false # Whether to checkpoint activations to save memory for DTensor
+    tensor_parallel_size: 2 # Number of tensor parallel groups
+    context_parallel_size: 1 # Number of context parallel groups
+    custom_parallel_plan: null # Optional custom Dtensor parallelism
+
+  dynamic_batching:
+    enabled: false # Enable dynamic batching
+
+  # makes the training sequence length divisible by the tensor parallel size
+  # this is useful for sequence parallel training
+  make_sequence_length_divisible_by: ${policy.dtensor_cfg.tensor_parallel_size} # Ensures that sequence length is divisible by tensor parallel size for compatibilty
+  max_grad_norm: 1.0 # Maximum gradient norm for clipping, used for stability
+
+  optimizer:
+    name: "torch.optim.AdamW" # Optimizer to use
+    kwargs:
+      lr: 5.0e-6 # Learning rate
+      weight_decay: 0.1 # L2 regularization
+      #betas: [0.9, 0.98] # Momentum for Adam(W)
+      #eps: 1e-5 # Epsilon for numerical stability
+      # when using Dtensor, we need to set foreach
+      # and fused to False
+      foreach: False 
+      fused: False
+    
+  ## ignored since enabled=false, but needed for testing purposes
+  megatron_cfg:
+    enabled: false # Enables/disables megatron
+    empty_unused_memory_level: 1 # Controls how aggressivley unused memory is freed
+    activation_checkpointing: false # Disables activation checkpointing
+    tensor_model_parallel_size: 2 # Parallelize via individual layers
+    pipeline_model_parallel_size: 2 # Parallelize via splitting layers across GPUs
+    context_parallel_size: 1 # Parallelize via context
+    pipeline_dtype: ${policy.precision} # Pipeline config e.g. Inherits precision from policy.precision
+    num_layers_in_first_pipeline_stage: null # Manually control how many layers are in the first pipeline stage. null = automatic
+    num_layers_in_last_pipeline_stage: null # Manually control how many layers are in the last pipeline stage. null = automatic
+    sequence_parallel: false
+    #gives ~20% training perf speedup with sequence packing 
+    apply_rope_fusion: True # Applies Rotatry Positional Embedding fusion  
+
+    optimizer:
+      optimizer: "adam"
+      lr: 5.0e-6
+      min_lr: 4.9999e-6
+      weight_decay: 0.1
+      bf16: false
+      fp16: false
+      params_dtype: "float32"
+
+      #adam
+      adam_beta1: 0.9
+      adam_beta2: 0.98
+      adam_eps: 1e-5
+
+      #sgd
+      sgd_momentum: 0.9
+
+      #distributed optimizer
+      use_distributed_optimizer: true # Use various optimizer logic
+      use_precision_aware_optimizer: true # Adapts optimizer logic to chosen precision
+
+      clip_grad: ${policy.max_grad_norm} # Clipping gradient threshold
+
+    scheduler:
+      start_weight_decay: ${policy.megatron_cfg.optimizer.weight_decay} # Set static weight decay
+      end_weight_decay: ${policy.megatron_cfg.optimizer.weight_decay} # Set static weight decay
+      weight_decay_incr_style: "constant" # Adjust weight decay style
+      lr_decay_style: "constant" # Adjust learning rate decay style
+      lr_decay_iters: null # Number of steps over which to decay learning rate
+      lr_warmup_iters: 50 # Number of steps over which to warmup learning rate
+      lr_warmup_init: 4.9999e-6 # Initial learning rate for warmup
+
+    distributed_data_parallel_config:
+      grad_reduce_in_fp32: false # Reduce gradient to FP32
+      overlap_grad_reduce: true # Start reducing gradients during compute
+      overlap_param_gather: true # Start gathering parameters during compute
+      average_in_collective: true # Average gradients in the collective communication
+      data_parallel_sharding_strategy: "optim_grads_params" # Specifies optimizer, gradient and parameter states are sharded during DDP
+
+    
+data:
+  max_input_seq_length: ${policy.max_total_sequence_length} # Max sequence length before truncation
+  dataset_name: "test_data" # Name of dataset
+  add_bos: true # Adds beginning of sequence token
+  add_eos: true # Adds end of sequence token
+  add_generation_prompt: false # Adds generation prompt to the input
+
+logger:
+  log_dir: "logs"  # Base directory for all logs
+  wandb_enabled: false # Make sure you do a ``wandb login [Your API key]'' before running
+  tensorboard_enabled: true
+  monitor_gpus: true  # If true, will monitor GPU usage and log to wandb and/or tensorboard
+  wandb:
+    project: "sft-dev" # WandB project name
+    name: "sft-dev-${data.dataset_name}" # WandB run name
+  tensorboard:
+    log_dir: "tb_logs-sft-dev-${data.dataset_name}" # TensorBoard log directory
+  gpu_monitoring:
+    collection_interval: 10  # How often to collect GPU usage metrics (in seconds)
+    flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
+
+cluster:
+  gpus_per_node: 4 # Number of GPUs per node
+  num_nodes: 1 # Number of nodes in the cluster
