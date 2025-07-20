@@ -23,41 +23,45 @@ OPEN_MATH_INSTRUCT_DATASET="openmathinstruct2"
 # ==================================== User-defined variables ====================================
 
 # ==== Training configuration ====
-MAX_EPOCHS=6
+
+## Total number of steps to train will equal
+## min((max_num_epochs * len(train_dataloader)), max_num_steps)
+MAX_EPOCHS=1
 MAX_STEPS=1000
-VAL_PERIOD=10
-VAL_BATCHES=8
-VAL_GLOBAL_BATCH_SIZE=64
-VAL_MICRO_BATCH_SIZE=4
-VAL_AT_START=$TRUE
-SEED=42
+VAL_PERIOD=10 # How often to run validation
+VAL_BATCHES=8 # Number of batches to use for validation
+VAL_GLOBAL_BATCH_SIZE=64 # Global batch size for validation
+VAL_MICRO_BATCH_SIZE=4 # Number of batches per GPU
+VAL_AT_START=$TRUE # Run validation before training
+SEED=42 # Random seed for reproducibility
 
 # ==== Checkpoint configuration ====
-ENABLED=$TRUE
-CHECKPOINT_DIR="/home/zeyad/nemo-rl/results/sft"
-KEEP_TOP_K=1
-SAVE_PERIOD=10
+ENABLED=$TRUE # Enable checkpointing
+#If enabled and checkpoint exists in same directory, will load current checkpoint
+CHECKPOINT_DIR="/home/zeyad/nemo-rl/results/sft/test" # Checkpoint directory
+KEEP_TOP_K=1 # Number of top checkpoints to keep
+SAVE_PERIOD=10 # How often to save checkpoints
 
 # ==== Model configuration ====
-MODEL=$MODEL_PWD"qwen2.5-0.5b-instruct"
+MODEL=$MODEL_PWD"qwen2.5-0.5b-instruct" # Model to use
 TOKENIZER_NAME=$MODEL
-TEMPLATE_PATH=$MODEL_CHAT_PWD"qwen2.5-0.5b-instruct_chat_template.txt"
-TRAIN_GLOBAL_BATCH_SIZE=128
-TRAIN_MICRO_BATCH_SIZE=8
-MAX_TOTAL_TOKENS=1024
-PRECISION=$BF16
+TEMPLATE_PATH=$MODEL_CHAT_PWD"qwen2.5-0.5b-instruct_chat_template.txt" # Model chat template to use
+TRAIN_GLOBAL_BATCH_SIZE=128 # Global batch size for training
+TRAIN_MICRO_BATCH_SIZE=8 # Number of batches per GPU
+MAX_TOTAL_TOKENS=1024 # Maximum total tokens in a sequence
+PRECISION=$BF16 # Precision to use for training (bfloat16, float16, float32)
 
 # ==== DTensor configuration ====
-TENSOR_PARALLEL_SIZE=2
-CONTEXT_PARALLEL_SIZE=1
+TENSOR_PARALLEL_SIZE=2 # Tensor parallel size
+CONTEXT_PARALLEL_SIZE=1 # Context parallel size
 
 # ==== Optimizer configuration ====
-MAX_GRAD_NORM=1.0
-OPTIMIZER=$ADAMW
-LR="5.0e-6"
-WEIGHT_DECAY="0.1"
-BETAS="[0.9,0.98]"
-EPS="1e-5"
+MAX_GRAD_NORM=1.0 # Maximum gradient norm for clipping, used for stability
+OPTIMIZER=$ADAM # Optimizer to use (ADAMW, ADAM, SGD)
+LR="5.0e-6" # Learning rate
+WEIGHT_DECAY="0.1" # Weight decay for regularization
+BETAS="[0.9,0.98]" # Adam(W) optimizer betas
+EPS="1e-5" # Adam(W) optimizer epsilon for numerical stability
 
 # ==== Data configuration ====
 TRAIN_VAL_RATIO=0.8 # Ratio of training to validation data
@@ -65,64 +69,59 @@ MAX_INPUT_SEQ_LENGTH=$MAX_TOTAL_TOKENS
 DATASET=$DATA_PWD"arabic_legal/arabic_train_multiturn.json"
 
 # ==== Logging configuration ====
-GPU_MONITOR_ENABLE=$TRUE
-GPU_MONITOR_COLLECT_INTERVAL=10
-GPU_MONITOR_FLUSH_INTERVAL=10
+GPU_MONITOR_ENABLE=$TRUE # Enable GPU monitoring
+GPU_MONITOR_COLLECT_INTERVAL=10 # Interval for collecting GPU metrics in seconds
+GPU_MONITOR_FLUSH_INTERVAL=10 # Interval for flushing GPU metrics to disk in seconds
 
 # ==== Cluster(s) configuration ====
-GPUS_PER_NODE=4
-NUM_NODES=1
+GPUS_PER_NODE=4 # Number of GPUs per node
+NUM_NODES=1 # Number of nodes in the cluster
 
 # ==== Megatron configuration ====
-MEGATRON_ENABLED=$FALSE
+MEGATRON_ENABLED=$FALSE # Enable Megatron features
 if [ "$MEGATRON_ENABLED" = $TRUE ]; then
     echo "Megatron is enabled."
 else
-    echo "Megatron is not enabled."
+    echo "Megatron is NOT enabled."
 fi
 
-MEGATRON_EMPTY_UNUSED_MEMORY_LEVEL=1
-MEGATRON_ACTIVATION_CHECKPOINTING=$FALSE
-M_TENSOR_PARALLEL_SIZE=2
-M_PIPELINE_PARALLEL_SIZE=2
-M_CONTEXT_PARALLEL_SIZE=1
-PIPELINE_DTYPE=$PRECISION
-NUM_LAYERS_FIRST=$NULL
-NUM_LAYERS_LAST=$NULL
-SEQ_PARALLEL=$FALSE
-ROPE_FUSION=$TRUE
+MEGATRON_EMPTY_UNUSED_MEMORY_LEVEL=1 # Controls how aggressively unused memory is freed
+MEGATRON_ACTIVATION_CHECKPOINTING=$FALSE # Enable activation checkpointing to save memory
+M_TENSOR_PARALLEL_SIZE=2 # Tensor parallel size for Megatron
+M_PIPELINE_PARALLEL_SIZE=2 # Pipeline parallel size for Megatron
+M_CONTEXT_PARALLEL_SIZE=1 # Context parallel size for Megatron
+PIPELINE_DTYPE=$PRECISION # Data type for pipeline parallelism (bfloat16, float16, float32)
+NUM_LAYERS_FIRST=$NULL # Number of layers in the first pipeline stage, null for automatic calculation
+NUM_LAYERS_LAST=$NULL # Number of layers in the last pipeline stage, null for automatic calculation
+SEQ_PARALLEL=$FALSE # Enable sequence parallelism (Enabling providesds ~20% performance boost)
+ROPE_FUSION=$TRUE # Enable RoPE fusion for improved performance
 
 # ==== Megatron Optimizer ====
-MEGATRON_OPTIMIZER=$ADAM
-MEGATRON_LR="5.0e-6"
-MEGATRON_MIN_LR="4.9999e-6"
-MEGATRON_WEIGHT_DECAY="0.1"
-MEGATRON_BF16=$FALSE
-MEGATRON_FP16=$FALSE
-MEGATRON_PARAMS_DTYPE=$FP32
-ADAM_BETA1="0.9"
-ADAM_BETA2="0.98"
-ADAM_EPS="1e-5"
-SGD_MOMENTUM="0.9"
-DISTRIBUTED_OPTIMIZER=$TRUE
-PRECISION_OPTIMIZER=$TRUE
-CLIP_GRADIENTS=$MAX_GRAD_NORM
+MEGATRON_MIN_LR="4.9999e-6" # Minimum learning rate for Megatron optimizer
+MEGATRON_PARAMS_DTYPE=$FP32 # Data type for model parameters in Megatron optimizer
+ADAM_BETA1="0.9" # Adam optimizer beta1
+ADAM_BETA2="0.98" # Adam optimizer beta2
+ADAM_EPS="1e-5" # Adam optimizer epsilon for numerical stability
+SGD_MOMENTUM="0.9" # SGD optimizer momentum
+DISTRIBUTED_OPTIMIZER=$TRUE # Uses various optimizer logic to enhance training
+PRECISION_OPTIMIZER=$TRUE # Adapts optimizer logic to chosen precision
+CLIP_GRADIENTS=$MAX_GRAD_NORM # Enable gradient clipping to prevent exploding gradients
 
 # ==== Megatron Shceduler ====
-LR_WARMUP_ITERS=50
-LR_WARMUP_INIT="4.9999e-6"
-LR_DECAY_STYLE="constant"
-WEIGHT_DECAY_STYLE="constant"
-LR_DECAY_ITERS=$NULL
-START_WEIGHT_DECAY=$WEIGHT_DECAY
-END_WEIGHT_DECAY=$WEIGHT_DECAY
+LR_WARMUP_ITERS=50 # Number of iterations for learning rate warmup
+LR_WARMUP_INIT=$MEGATRON_MIN_LR # Initial learning rate for warmup
+LR_DECAY_STYLE="constant" # Learning rate decay style (constant, linear, cosine)
+WEIGHT_DECAY_STYLE="constant" # Weight decay style (constant, linear, cosine)
+LR_DECAY_ITERS=$NULL # Number of iterations for learning rate decay, null for automatic calculation
+START_WEIGHT_DECAY=$WEIGHT_DECAY # Initial weight decay for the scheduler
+END_WEIGHT_DECAY=$WEIGHT_DECAY # Final weight decay for the scheduler
 
 # ==== Megatron DDP ====
-GRAD_REDUCE_FP32=$FALSE
-OVERLAP_GRAD_REDUCE=$TRUE
-OVERLAP_PARAM_GATHER=$TRUE
-AVERAGE_IN_COLLECTIVE=$TRUE
-DP_SHARDING_STRATEGY="optim_grads_params"
+GRAD_REDUCE_FP32=$FALSE # Use FP32 for gradient reduction to improve numerical stability
+OVERLAP_GRAD_REDUCE=$TRUE # Start reducing gradients while computing forward pass
+OVERLAP_PARAM_GATHER=$TRUE # Start gathering parameters while computing backward pass
+AVERAGE_IN_COLLECTIVE=$TRUE # Average gradients in collective communication
+DP_SHARDING_STRATEGY="optim_grads_params" # Data parallel sharding strategy (optim_grads_params, optim_grads, optim_params, none)
 
 # ==== Logic argument for data format fitting ====
 DATASET_TYPE=$OPENAI_DATASET # Options: prompt_response_dataset, openai_format, open_assistant, openmathinstruct2
@@ -183,8 +182,35 @@ elif [ "$DATASET_TYPE" = "openmathinstruct2" ]; then
     ARGS+=" +data.prompt_file=/path/to/openmathinstruct2/prompts.json"
 fi
 
+# ========== Ray Start and Auto-Cleanup ==========
+
+export RAY_TMP_DIR="/tmp/ray_session_$RANDOM"
+mkdir -p "$RAY_TMP_DIR"
+
+# Trap Ctrl+C or script termination to stop Ray cleanly
+cleanup_ray() {
+  echo "🛑 Caught interruption. Stopping Ray..."
+  uv run ray stop --force || true
+  rm -rf "$RAY_TMP_DIR" || true
+}
+trap cleanup_ray INT TERM EXIT
+
+# Start Ray head
+uv run ray start --head --temp-dir="$RAY_TMP_DIR" --disable-usage-stats
+
+# Extract Ray address
+RAY_ADDRESS=$(find "$RAY_TMP_DIR" -type f -name "ray_start.log" -exec grep -oP '(?<=--address=)\S+' {} \; | head -n 1)
+if [ -z "$RAY_ADDRESS" ]; then
+  echo "⚠️ Could not detect Ray address automatically. Using fallback."
+  RAY_ADDRESS="127.0.0.1:6379"
+fi
+export RAY_ADDRESS
+
+echo "✅ Ray head started at $RAY_ADDRESS"
+echo "📂 Logs will be in $RAY_TMP_DIR"
+
 # ==== Run python script with config overrides ====
-RAY_ADDRESS=auto uv run python examples/run_sft.py \
+uv run python examples/run_sft.py \
     sft.max_num_epochs=${MAX_EPOCHS} \
     sft.max_num_steps=${MAX_STEPS} \
     sft.val_period=${VAL_PERIOD} \
@@ -219,7 +245,7 @@ RAY_ADDRESS=auto uv run python examples/run_sft.py \
     cluster.gpus_per_node=${GPUS_PER_NODE} \
     cluster.num_nodes=${NUM_NODES} \
     policy.megatron_cfg.enabled=$MEGATRON_ENABLED \
-    policy.megatron_cfg.empty_unused_memory_level=${MEGATRON_EMPTY_UNUSED_MEM_LEVEL} \
+    policy.megatron_cfg.empty_unused_memory_level=${MEGATRON_EMPTY_UNUSED_MEMORY_LEVEL} \
     policy.megatron_cfg.activation_checkpointing=$MEGATRON_ACTIVATION_CHECKPOINTING \
     policy.megatron_cfg.tensor_model_parallel_size=${M_TENSOR_PARALLEL_SIZE} \
     policy.megatron_cfg.pipeline_model_parallel_size=${M_PIPELINE_PARALLEL_SIZE} \
@@ -229,12 +255,10 @@ RAY_ADDRESS=auto uv run python examples/run_sft.py \
     +policy.megatron_cfg.num_layers_in_last_pipeline_stage=${NUM_LAYERS_LAST:-null} \
     policy.megatron_cfg.sequence_parallel=$SEQ_PARALLEL \
     policy.megatron_cfg.apply_rope_fusion=$ROPE_FUSION \
-    policy.megatron_cfg.optimizer.optimizer=$MEGATRON_OPTIMIZER \
-    policy.megatron_cfg.optimizer.lr=$MEGATRON_LR \
+    policy.megatron_cfg.optimizer.optimizer=$OPTIMIZER \
+    policy.megatron_cfg.optimizer.lr=$LR \
     policy.megatron_cfg.optimizer.min_lr=$MEGATRON_MIN_LR \
     policy.megatron_cfg.optimizer.weight_decay=$WEIGHT_DECAY \
-    policy.megatron_cfg.optimizer.bf16=$MEGATRON_BF16 \
-    policy.megatron_cfg.optimizer.fp16=$MEGATRON_FP16 \
     policy.megatron_cfg.optimizer.params_dtype=$MEGATRON_PARAMS_DTYPE \
     policy.megatron_cfg.optimizer.adam_beta1=$ADAM_BETA1 \
     policy.megatron_cfg.optimizer.adam_beta2=$ADAM_BETA2 \
