@@ -42,3 +42,7 @@ bash setup_nemo_rl.bash
 ### `assets/split_dataset.py`
 > **Type**: Python script  
 > **Purpose**: Splits a full dataset into training and validation sets in `.json` or `.jsonl` format.
+
+### `setup_nemo_rl.bash`
+> **Type**: Shell Script
+> **Purpose**: Automates NeMo-RL setup, dependency installation, and asset copying.
