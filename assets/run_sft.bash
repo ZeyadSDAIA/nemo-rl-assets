@@ -26,47 +26,49 @@ OPEN_MATH_INSTRUCT_DATASET="openmathinstruct2"
 
 ## Total number of steps to train will equal
 ## min((max_num_epochs * len(train_dataloader)), max_num_steps)
-MAX_EPOCHS=1
-MAX_STEPS=1000
+MAX_EPOCHS=2
+MAX_STEPS=6200
 VAL_PERIOD=10 # How often to run validation
-VAL_BATCHES=8 # Number of batches to use for validation
-VAL_GLOBAL_BATCH_SIZE=64 # Global batch size for validation
-VAL_MICRO_BATCH_SIZE=4 # Number of batches per GPU
+VAL_BATCHES=16 # Number of batches to use for validation
+VAL_GLOBAL_BATCH_SIZE=8 # Global batch size for validation
+VAL_MICRO_BATCH_SIZE=2 # Number of batches per GPU
 VAL_AT_START=$TRUE # Run validation before training
 SEED=42 # Random seed for reproducibility
+CHECKPOINT=$TRUE # Checkpoints activation to save memory
 
 # ==== Checkpoint configuration ====
 ENABLED=$TRUE # Enable checkpointing
 #If enabled and checkpoint exists in same directory, will load current checkpoint
-CHECKPOINT_DIR="/home/zeyad/nemo-rl/results/sft/test" # Checkpoint directory
+CHECKPOINT_DIR="/home/zeyad/nemo-rl/results/sft" # Checkpoint directory
 KEEP_TOP_K=1 # Number of top checkpoints to keep
-SAVE_PERIOD=10 # How often to save checkpoints
+SAVE_PERIOD=200 # How often to save checkpoints
 
 # ==== Model configuration ====
-MODEL=$MODEL_PWD"qwen2.5-0.5b-instruct" # Model to use
+MODEL="/media/ExtremeSSD/models/Qwen2.5-3B-Instruct" # Model to use. If using HF model, remove $MODEL_PWD prefix
 TOKENIZER_NAME=$MODEL
-TEMPLATE_PATH=$MODEL_CHAT_PWD"qwen2.5-0.5b-instruct_chat_template.txt" # Model chat template to use
-TRAIN_GLOBAL_BATCH_SIZE=128 # Global batch size for training
-TRAIN_MICRO_BATCH_SIZE=8 # Number of batches per GPU
-MAX_TOTAL_TOKENS=1024 # Maximum total tokens in a sequence
-PRECISION=$BF16 # Precision to use for training (bfloat16, float16, float32)
+TEMPLATE_PATH=$MODEL_CHAT_PWD"qwen2.5-3b_instruct_chat_template.txt" # Model chat template to use
+TRAIN_GLOBAL_BATCH_SIZE=8 # Global batch size for training
+TRAIN_MICRO_BATCH_SIZE=2 # Number of batches per GPU
+MAX_TOTAL_TOKENS=2024 # Maximum total tokens in a sequence
+PRECISION=$FP16 # Precision to use for training (bfloat16, float16, float32)
 
 # ==== DTensor configuration ====
-TENSOR_PARALLEL_SIZE=2 # Tensor parallel size
+TENSOR_PARALLEL_SIZE=1 # Tensor parallel size
 CONTEXT_PARALLEL_SIZE=1 # Context parallel size
 
 # ==== Optimizer configuration ====
 MAX_GRAD_NORM=1.0 # Maximum gradient norm for clipping, used for stability
-OPTIMIZER=$ADAM # Optimizer to use (ADAMW, ADAM, SGD)
-LR="5.0e-6" # Learning rate
+OPTIMIZER=$ADAMW # Optimizer to use (ADAMW, ADAM, SGD)
+LR="2.0e-6" # Learning rate
 WEIGHT_DECAY="0.1" # Weight decay for regularization
 BETAS="[0.9,0.98]" # Adam(W) optimizer betas
-EPS="1e-5" # Adam(W) optimizer epsilon for numerical stability
+EPS="1e-8" # Adam(W) optimizer epsilon for numerical stability
 
 # ==== Data configuration ====
+PRE_TOKENIZE=$FALSE # Pre-tokenize the dataset
 TRAIN_VAL_RATIO=0.8 # Ratio of training to validation data
 MAX_INPUT_SEQ_LENGTH=$MAX_TOTAL_TOKENS
-DATASET=$DATA_PWD"arabic_legal/arabic_train_multiturn.json"
+DATASET=$DATA_PWD"arabic_data_test/arabic_hf_datasets.jsonl"
 
 # ==== Logging configuration ====
 GPU_MONITOR_ENABLE=$TRUE # Enable GPU monitoring
@@ -126,23 +128,47 @@ DP_SHARDING_STRATEGY="optim_grads_params" # Data parallel sharding strategy (opt
 # ==== Logic argument for data format fitting ====
 DATASET_TYPE=$OPENAI_DATASET # Options: prompt_response_dataset, openai_format, open_assistant, openmathinstruct2
 
-# ==================================== Running script DO NOT TOUCH ====================================
+# ==================================== Running script... DO NOT TOUCH ====================================
 
 # ==== Prepare data splitting for training and validation ====
 # Exit immediately on error
 set -e
 
+ARGS=""
+OPTIM=""
+ARGS+="+data.tokenized=$PRE_TOKENIZE"
+
 # Check if files exist
 if [ ! -f "$DATASET" ]; then
-  echo "❌ Dataset not found: $DATASET"
-  exit 1
+echo "❌ Dataset not found: $DATASET"
+exit 1
 fi
 
-readarray -t SPLIT_PATHS < <(python split_dataset.py "$DATASET" "$TRAIN_VAL_RATIO")
-TRAIN_PATH="${SPLIT_PATHS[0]}"
-VAL_PATH="${SPLIT_PATHS[1]}"
-
-OPTIM=""
+# === Pre-tokenize if applicable ====
+if [ "$PRE_TOKENIZE" = $TRUE ]; then
+    echo "🔄 Pre-tokenizing dataset..."
+    TOKENIZED_DATASET="${DATASET%.jsonl}_tokenized.jsonl"
+    if [ ! -f "$TOKENIZED_DATASET" ]; then
+        echo "🧪 Tokenizing dataset with HuggingFace tokenizer..."
+        uv run python tokenize_oai.py \
+            --input_path "${DATASET}" \
+            --output_path "${TOKENIZED_DATASET}" \
+            --tokenizer_path "${MODEL}" \
+            --max_seq_len ${MAX_TOTAL_TOKENS}
+        echo "✅ Tokenization complete."
+    else
+        echo "Tokenized dataset already exists at ${TOKENIZED_DATASET}"
+    fi
+    echo "🔄 Splitting dataset into training and validation sets..."
+    readarray -t SPLIT_PATHS < <(python split_dataset.py "$TOKENIZED_DATASET" "$TRAIN_VAL_RATIO")
+    TRAIN_PATH="${SPLIT_PATHS[0]}"
+    VAL_PATH="${SPLIT_PATHS[1]}"
+else
+    echo "🔄 Splitting dataset into training and validation sets..."
+    readarray -t SPLIT_PATHS < <(python split_dataset.py "$DATASET" "$TRAIN_VAL_RATIO")
+    TRAIN_PATH="${SPLIT_PATHS[0]}"
+    VAL_PATH="${SPLIT_PATHS[1]}"
+fi
 
 if [ "$OPTIMIZER" = $ADAMW ]; then
     OPTIM+=" policy.optimizer.name=$ADAMW"
@@ -155,8 +181,6 @@ elif [ "$OPTIMIZER" = $ADAM ]; then
 elif [ "$OPTIMIZER" = $SGD ]; then
     OPTIM+=" policy.optimizer.name=$SGD"
 fi
-
-ARGS=""
 
 if [ "$DATASET_TYPE" = "prompt_response_dataset" ]; then
     ARGS+=" data.dataset_name=prompt_response_dataset"
@@ -211,6 +235,9 @@ export RAY_ADDRESS
 echo "✅ Ray head started at $RAY_ADDRESS"
 echo "📂 Logs will be in $RAY_TMP_DIR"
 
+echo "🧪 TRAIN_PATH: $TRAIN_PATH"
+echo "🧪 VAL_PATH:   $VAL_PATH"
+
 # ==== Run python script with config overrides ====
 uv run python examples/run_sft.py \
     sft.max_num_epochs=${MAX_EPOCHS} \
@@ -228,6 +255,7 @@ uv run python examples/run_sft.py \
     policy.model_name=$MODEL \
     policy.tokenizer.name=$TOKENIZER_NAME \
     policy.tokenizer.chat_template=$TEMPLATE_PATH \
+    policy.activation_checkpointing_enabled=$CHECKPOINT \
     policy.train_global_batch_size=${TRAIN_GLOBAL_BATCH_SIZE} \
     policy.train_micro_batch_size=${TRAIN_MICRO_BATCH_SIZE} \
     policy.max_total_sequence_length=${MAX_TOTAL_TOKENS} \

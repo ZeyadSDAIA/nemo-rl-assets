@@ -116,8 +116,6 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig):
             data_config["system_key"],
             data_config["system_prompt"],
         )
-    elif data_cls == "test_data":
-        data = hf_datasets.ArabicSFTDataset()
     else:
         raise ValueError(f"Unknown dataset class: {data_cls}")
     print(
@@ -197,7 +195,7 @@ def main():
         with open(chat_template_path, "r", encoding="utf-8") as f:
             tokenizer.chat_template = f.read()
             print(f"✅ Loaded chat template from: {chat_template_path}")
-            
+
     # setup data
     (
         dataset,
