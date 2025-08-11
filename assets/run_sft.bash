@@ -1,244 +1,400 @@
 #!/bin/bash
+# ==================================== SFT Training Script ====================================
 
-# ==================================== Pre-defined variables =====================================
+# Exit on error, undefined variable, pipe failure
+set -euo pipefail
 
-TRUE=true
-FALSE=false
-NULL=""
-MODEL_PWD="/media/ExtremeSSD/models/"
-MODEL_CHAT_PWD="/media/ExtremeSSD/models/models_chat_template/"
-DATA_PWD="/media/ExtremeSSD/llm_data/test_data/"
-LOG_PWD="/media/ExtremeSSD/logs/megatron_test"
-BF16="bfloat16"
-FP16="float16"
-FP32="float32"
-ADAM="torch.optim.Adam"
-ADAMW="torch.optim.AdamW"
-SGD="torch.optim.SGD"
-PROMPT_DATASET="prompt_response_dataset"
-OPENAI_DATASET="openai_format"
-OPEN_ASSISTANT_DATAST="open_assistant"
-OPEN_MATH_INSTRUCT_DATASET="openmathinstruct2"
+# =============================== Logging Functions ===============================
+log_info()  { printf "ℹ️  %s %s\n" "$(date '+%H:%M:%S')" "$*" >&2; }
+log_warn()  { printf "⚠️  %s %s\n" "$(date '+%H:%M:%S')" "$*" >&2; }
+log_error() { printf "❌ %s %s\n" "$(date '+%H:%M:%S')" "$*" >&2; }
 
-# ==================================== User-defined variables ====================================
+# =============================== TRUE CONSTANTS ===============================
+declare -r TRUE=true
+declare -r FALSE=false
+declare -r TRUE_STR="true"
+declare -r FALSE_STR="false"
+declare -r NULL="null"
+declare -r BF16="bfloat16"
+declare -r FP16="float16"
+declare -r FP32="float32"
+declare -r ADAM="torch.optim.Adam"
+declare -r ADAMW="torch.optim.AdamW"
+declare -r ADAM_FUSED="torch.optim.AdamW"
+declare -r SGD="torch.optim.SGD"
+declare -r PROMPT_DATASET="prompt_response_dataset"
+declare -r OPENAI_DATASET="openai_format"
+declare -r OPEN_ASSISTANT_DATAST="open_assistant"
+declare -r OPEN_MATH_INSTRUCT_DATASET="openmathinstruct2"
+declare -r MODEL_PWD="/media/ExtremeSSD/models/"
+declare -r MODEL_CHAT_PWD="/media/ExtremeSSD/models/models_chat_template/"
+declare -r DATA_PWD="/media/ExtremeSSD/llm_data/"
+declare -r LOG_PWD="/media/ExtremeSSD/logs/megatron_test"
 
+# =============================== User Variables (Mutable) ===============================
 # ==== Training configuration ====
-
-## Total number of steps to train will equal
-## min((max_num_epochs * len(train_dataloader)), max_num_steps)
 MAX_EPOCHS=2
-MAX_STEPS=6200
-VAL_PERIOD=10 # How often to run validation
-VAL_BATCHES=16 # Number of batches to use for validation
-VAL_GLOBAL_BATCH_SIZE=8 # Global batch size for validation
-VAL_MICRO_BATCH_SIZE=2 # Number of batches per GPU
-VAL_AT_START=$TRUE # Run validation before training
-SEED=42 # Random seed for reproducibility
-CHECKPOINT=$TRUE # Checkpoints activation to save memory
+MAX_STEPS=9000
+VAL_PERIOD=100
+VAL_BATCHES=10
+VAL_GLOBAL_BATCH_SIZE=64
+VAL_MICRO_BATCH_SIZE=8
+VAL_AT_START=$TRUE
+SEED=42
+CHECKPOINT=$TRUE
 
 # ==== Checkpoint configuration ====
-ENABLED=$TRUE # Enable checkpointing
-#If enabled and checkpoint exists in same directory, will load current checkpoint
-CHECKPOINT_DIR="/home/zeyad/nemo-rl/results/sft" # Checkpoint directory
-KEEP_TOP_K=1 # Number of top checkpoints to keep
-SAVE_PERIOD=200 # How often to save checkpoints
+ENABLED=$TRUE
+CHECKPOINT_DIR="/home/zeyad/nemo-rl/results/sft"
+KEEP_TOP_K=1
+SAVE_PERIOD=100
 
 # ==== Model configuration ====
-MODEL="/media/ExtremeSSD/models/Qwen2.5-3B-Instruct" # Model to use. If using HF model, remove $MODEL_PWD prefix
+MODEL="Qwen/Qwen2.5-1.5B-Instruct"
 TOKENIZER_NAME=$MODEL
-TEMPLATE_PATH=$MODEL_CHAT_PWD"qwen2.5-3b_instruct_chat_template.txt" # Model chat template to use
-TRAIN_GLOBAL_BATCH_SIZE=8 # Global batch size for training
-TRAIN_MICRO_BATCH_SIZE=2 # Number of batches per GPU
-MAX_TOTAL_TOKENS=2024 # Maximum total tokens in a sequence
-PRECISION=$FP16 # Precision to use for training (bfloat16, float16, float32)
+TEMPLATE_PATH="${MODEL_CHAT_PWD}qwen2.5-1.5b-instruct_chat_template.txt"
+TRAIN_GLOBAL_BATCH_SIZE=64
+TRAIN_MICRO_BATCH_SIZE=8
+MAX_TOTAL_TOKENS=1024
+PRECISION=$BF16
 
 # ==== DTensor configuration ====
-TENSOR_PARALLEL_SIZE=1 # Tensor parallel size
-CONTEXT_PARALLEL_SIZE=1 # Context parallel size
+TENSOR_PARALLEL_SIZE=1
+CONTEXT_PARALLEL_SIZE=1
 
 # ==== Optimizer configuration ====
-MAX_GRAD_NORM=1.0 # Maximum gradient norm for clipping, used for stability
-OPTIMIZER=$ADAMW # Optimizer to use (ADAMW, ADAM, SGD)
-LR="2.0e-6" # Learning rate
-WEIGHT_DECAY="0.1" # Weight decay for regularization
-BETAS="[0.9,0.98]" # Adam(W) optimizer betas
-EPS="1e-8" # Adam(W) optimizer epsilon for numerical stability
+MAX_GRAD_NORM=1.0
+OPTIMIZER=$ADAMW
+LR="1.0e-5"
+WEIGHT_DECAY="0.01"
+BETAS="[0.9,0.98]"
+EPS="1e-8"
 
 # ==== Data configuration ====
-PRE_TOKENIZE=$FALSE # Pre-tokenize the dataset
-TRAIN_VAL_RATIO=0.8 # Ratio of training to validation data
+PRE_TOKENIZE=$FALSE
+TRAIN_VAL_RATIO=0.8
 MAX_INPUT_SEQ_LENGTH=$MAX_TOTAL_TOKENS
-DATASET=$DATA_PWD"arabic_data_test/arabic_hf_datasets.jsonl"
+DATASET="/media/ExtremeSSD/llm_data/llm_sft_althubaity/Processed/sft/nemo-rl-test/7m_sampled/processed_1m_sample_oai.jsonl"
+TMP_WORKDIR="/home/zeyad/nemo-rl/tmp_data"
 
 # ==== Logging configuration ====
-GPU_MONITOR_ENABLE=$TRUE # Enable GPU monitoring
-GPU_MONITOR_COLLECT_INTERVAL=10 # Interval for collecting GPU metrics in seconds
-GPU_MONITOR_FLUSH_INTERVAL=10 # Interval for flushing GPU metrics to disk in seconds
+GPU_MONITOR_ENABLE=$TRUE
+GPU_MONITOR_COLLECT_INTERVAL=10
+GPU_MONITOR_FLUSH_INTERVAL=10
 
 # ==== Cluster(s) configuration ====
-GPUS_PER_NODE=4 # Number of GPUs per node
-NUM_NODES=1 # Number of nodes in the cluster
+GPUS_PER_NODE=4
+NUM_NODES=1
 
 # ==== Megatron configuration ====
-MEGATRON_ENABLED=$FALSE # Enable Megatron features
-if [ "$MEGATRON_ENABLED" = $TRUE ]; then
-    echo "Megatron is enabled."
-else
-    echo "Megatron is NOT enabled."
-fi
-
-MEGATRON_EMPTY_UNUSED_MEMORY_LEVEL=1 # Controls how aggressively unused memory is freed
-MEGATRON_ACTIVATION_CHECKPOINTING=$FALSE # Enable activation checkpointing to save memory
-M_TENSOR_PARALLEL_SIZE=2 # Tensor parallel size for Megatron
-M_PIPELINE_PARALLEL_SIZE=2 # Pipeline parallel size for Megatron
-M_CONTEXT_PARALLEL_SIZE=1 # Context parallel size for Megatron
-PIPELINE_DTYPE=$PRECISION # Data type for pipeline parallelism (bfloat16, float16, float32)
-NUM_LAYERS_FIRST=$NULL # Number of layers in the first pipeline stage, null for automatic calculation
-NUM_LAYERS_LAST=$NULL # Number of layers in the last pipeline stage, null for automatic calculation
-SEQ_PARALLEL=$FALSE # Enable sequence parallelism (Enabling providesds ~20% performance boost)
-ROPE_FUSION=$TRUE # Enable RoPE fusion for improved performance
+MEGATRON_ENABLED=$TRUE
+MEGATRON_EMPTY_UNUSED_MEMORY_LEVEL=1
+MEGATRON_ACTIVATION_CHECKPOINTING=$TRUE
+M_TENSOR_PARALLEL_SIZE=1
+M_PIPELINE_PARALLEL_SIZE=1
+M_CONTEXT_PARALLEL_SIZE=1
+PIPELINE_DTYPE=$PRECISION
+NUM_LAYERS_FIRST=$NULL
+NUM_LAYERS_LAST=$NULL
+SEQ_PARALLEL=$FALSE
+ROPE_FUSION=$FALSE
 
 # ==== Megatron Optimizer ====
-MEGATRON_MIN_LR="4.9999e-6" # Minimum learning rate for Megatron optimizer
-MEGATRON_PARAMS_DTYPE=$FP32 # Data type for model parameters in Megatron optimizer
-ADAM_BETA1="0.9" # Adam optimizer beta1
-ADAM_BETA2="0.98" # Adam optimizer beta2
-ADAM_EPS="1e-5" # Adam optimizer epsilon for numerical stability
-SGD_MOMENTUM="0.9" # SGD optimizer momentum
-DISTRIBUTED_OPTIMIZER=$TRUE # Uses various optimizer logic to enhance training
-PRECISION_OPTIMIZER=$TRUE # Adapts optimizer logic to chosen precision
-CLIP_GRADIENTS=$MAX_GRAD_NORM # Enable gradient clipping to prevent exploding gradients
+MEGATRON_MIN_LR="1e-6"
+MEGATRON_PARAMS_DTYPE=$PRECISION
+ADAM_BETA1="0.9"
+ADAM_BETA2="0.98"
+ADAM_EPS="1e-5"
+SGD_MOMENTUM="0.9"
+DISTRIBUTED_OPTIMIZER=$FALSE
+PRECISION_OPTIMIZER=$FALSE_STR
+CLIP_GRADIENTS=$MAX_GRAD_NORM
 
-# ==== Megatron Shceduler ====
-LR_WARMUP_ITERS=50 # Number of iterations for learning rate warmup
-LR_WARMUP_INIT=$MEGATRON_MIN_LR # Initial learning rate for warmup
-LR_DECAY_STYLE="constant" # Learning rate decay style (constant, linear, cosine)
-WEIGHT_DECAY_STYLE="constant" # Weight decay style (constant, linear, cosine)
-LR_DECAY_ITERS=$NULL # Number of iterations for learning rate decay, null for automatic calculation
-START_WEIGHT_DECAY=$WEIGHT_DECAY # Initial weight decay for the scheduler
-END_WEIGHT_DECAY=$WEIGHT_DECAY # Final weight decay for the scheduler
+# ==== Megatron Scheduler ====
+LR_WARMUP_ITERS=300
+LR_WARMUP_INIT=$MEGATRON_MIN_LR
+LR_DECAY_STYLE="cosine"
+WEIGHT_DECAY_STYLE="constant"
+LR_DECAY_ITERS=$NULL
+START_WEIGHT_DECAY=$WEIGHT_DECAY
+END_WEIGHT_DECAY=$WEIGHT_DECAY
 
 # ==== Megatron DDP ====
-GRAD_REDUCE_FP32=$FALSE # Use FP32 for gradient reduction to improve numerical stability
-OVERLAP_GRAD_REDUCE=$TRUE # Start reducing gradients while computing forward pass
-OVERLAP_PARAM_GATHER=$TRUE # Start gathering parameters while computing backward pass
-AVERAGE_IN_COLLECTIVE=$TRUE # Average gradients in collective communication
-DP_SHARDING_STRATEGY="optim_grads_params" # Data parallel sharding strategy (optim_grads_params, optim_grads, optim_params, none)
+GRAD_REDUCE_FP32=$FALSE
+OVERLAP_GRAD_REDUCE=$FALSE
+OVERLAP_PARAM_GATHER=$FALSE
+AVERAGE_IN_COLLECTIVE=$TRUE
+DP_SHARDING_STRATEGY="optim_grads_params"
 
-# ==== Logic argument for data format fitting ====
-DATASET_TYPE=$OPENAI_DATASET # Options: prompt_response_dataset, openai_format, open_assistant, openmathinstruct2
+# ==== Dataset Type ====
+DATASET_TYPE=$OPENAI_DATASET
 
-# ==================================== Running script... DO NOT TOUCH ====================================
+# =============================== Running script: DO NOT TOUCH ===============================
 
-# ==== Prepare data splitting for training and validation ====
-# Exit immediately on error
-set -e
-
-ARGS=""
-OPTIM=""
-ARGS+="+data.tokenized=$PRE_TOKENIZE"
-
-# Check if files exist
-if [ ! -f "$DATASET" ]; then
-echo "❌ Dataset not found: $DATASET"
-exit 1
-fi
-
-# === Pre-tokenize if applicable ====
-if [ "$PRE_TOKENIZE" = $TRUE ]; then
-    echo "🔄 Pre-tokenizing dataset..."
-    TOKENIZED_DATASET="${DATASET%.jsonl}_tokenized.jsonl"
-    if [ ! -f "$TOKENIZED_DATASET" ]; then
-        echo "🧪 Tokenizing dataset with HuggingFace tokenizer..."
-        uv run python tokenize_oai.py \
-            --input_path "${DATASET}" \
-            --output_path "${TOKENIZED_DATASET}" \
-            --tokenizer_path "${MODEL}" \
-            --max_seq_len ${MAX_TOTAL_TOKENS}
-        echo "✅ Tokenization complete."
-    else
-        echo "Tokenized dataset already exists at ${TOKENIZED_DATASET}"
-    fi
-    echo "🔄 Splitting dataset into training and validation sets..."
-    readarray -t SPLIT_PATHS < <(python split_dataset.py "$TOKENIZED_DATASET" "$TRAIN_VAL_RATIO")
-    TRAIN_PATH="${SPLIT_PATHS[0]}"
-    VAL_PATH="${SPLIT_PATHS[1]}"
+# =============================== Data Splitting ===============================
+log_info "🚀 Script started"
+if [[ $MEGATRON_ENABLED == $TRUE ]]; then
+    log_info "🔧 Megatron mode enabled"
 else
-    echo "🔄 Splitting dataset into training and validation sets..."
-    readarray -t SPLIT_PATHS < <(python split_dataset.py "$DATASET" "$TRAIN_VAL_RATIO")
-    TRAIN_PATH="${SPLIT_PATHS[0]}"
-    VAL_PATH="${SPLIT_PATHS[1]}"
+    log_info "🔧 DTensor mode enabled"
 fi
+log_info "🔄 Splitting dataset to local fast storage..."
 
-if [ "$OPTIMIZER" = $ADAMW ]; then
-    OPTIM+=" policy.optimizer.name=$ADAMW"
-    OPTIM+=" +policy.optimizer.kwargs.betas=$BETAS"
-    OPTIM+=" +policy.optimizer.kwargs.eps=$EPS"
-elif [ "$OPTIMIZER" = $ADAM ]; then
-    OPTIM+=" policy.optimizer.name=$ADAM"
-    OPTIM+=" +policy.optimizer.kwargs.betas=$BETAS"
-    OPTIM+=" +policy.optimizer.kwargs.eps=$EPS"
-elif [ "$OPTIMIZER" = $SGD ]; then
-    OPTIM+=" policy.optimizer.name=$SGD"
-fi
-
-if [ "$DATASET_TYPE" = "prompt_response_dataset" ]; then
-    ARGS+=" data.dataset_name=prompt_response_dataset"
-    ARGS+=" +data.train_data_path=$TRAIN_PATH"
-    ARGS+=" +data.val_data_path=$VAL_PATH"
-    ARGS+=" +data.input_key=prompt"
-    ARGS+=" +data.output_key=response"
-
-elif [ "$DATASET_TYPE" = "openai_format" ]; then
-    ARGS+=" data.dataset_name=openai_format"
-    ARGS+=" +data.train_data_path=$TRAIN_PATH"
-    ARGS+=" +data.val_data_path=$VAL_PATH"
-    ARGS+=" +data.chat_key=messages"
-    ARGS+=" +data.system_key=null"
-    ARGS+=" +data.system_prompt=null"
-
-elif [ "$DATASET_TYPE" = "open_assistant" ]; then
-    ARGS+=" data.dataset_name=open_assistant"
-    # No train/val split needed, dataset loads internally
-
-elif [ "$DATASET_TYPE" = "openmathinstruct2" ]; then
-    ARGS+=" data.dataset_name=openmathinstruct2"
-    ARGS+=" +data.split=train"
-    ARGS+=" +data.output_key=output"
-    ARGS+=" +data.prompt_file=/path/to/openmathinstruct2/prompts.json"
-fi
-
-# ========== Ray Start and Auto-Cleanup ==========
-
-export RAY_TMP_DIR="/tmp/ray_session_$RANDOM"
+# Use mktemp -d for RAY_TMP_DIR (Optim 1)
+RAY_TMP_DIR=$(mktemp -d /tmp/ray_session_XXXXXX)
 mkdir -p "$RAY_TMP_DIR"
 
-# Trap Ctrl+C or script termination to stop Ray cleanly
-cleanup_ray() {
-  echo "🛑 Caught interruption. Stopping Ray..."
-  uv run ray stop --force || true
-  rm -rf "$RAY_TMP_DIR" || true
-}
-trap cleanup_ray INT TERM EXIT
+# Increase file limits (Optim 11)
+ulimit -n 65536 || log_warn "Could not increase file descriptor limit"
 
-# Start Ray head
-uv run ray start --head --temp-dir="$RAY_TMP_DIR" --disable-usage-stats
-
-# Extract Ray address
-RAY_ADDRESS=$(find "$RAY_TMP_DIR" -type f -name "ray_start.log" -exec grep -oP '(?<=--address=)\S+' {} \; | head -n 1)
-if [ -z "$RAY_ADDRESS" ]; then
-  echo "⚠️ Could not detect Ray address automatically. Using fallback."
-  RAY_ADDRESS="127.0.0.1:6379"
+# Validate dataset
+if [[ ! -f "$DATASET" ]]; then
+    log_error "❌ Dataset not found: $DATASET"
+    exit 1
 fi
-export RAY_ADDRESS
 
-echo "✅ Ray head started at $RAY_ADDRESS"
-echo "📂 Logs will be in $RAY_TMP_DIR"
+# Create temp file for capturing output
+TMP_PATHS=$(mktemp)
 
-echo "🧪 TRAIN_PATH: $TRAIN_PATH"
-echo "🧪 VAL_PATH:   $VAL_PATH"
+# Run split and capture all output (logs + paths)
+log_info "📦 Running split_dataset.py..."
+python_output=$(python split_dataset.py "$DATASET" "$TRAIN_VAL_RATIO" "$SEED" "$TMP_WORKDIR" 2>&1 | tee /dev/tty)
 
-# ==== Run python script with config overrides ====
+# Save full output for inspection (optional)
+echo "$python_output" > "$TMP_PATHS"
+
+# === Extract SPLIT_DIR from stderr ===
+SPLIT_DIR=$(echo "$python_output" | grep "📌 SPLIT_DIR=" | sed 's|📌 SPLIT_DIR=||' | head -n1 | xargs)
+if [[ -n "$SPLIT_DIR" && -d "$SPLIT_DIR" ]]; then
+    log_info "📁 Temporary split directory: $SPLIT_DIR"
+else
+    log_warn "⚠️ Could not detect valid SPLIT_DIR"
+    SPLIT_DIR=""  # Ensure empty if invalid
+fi
+
+# === Extract ONLY the two .jsonl file paths from stdout ===
+# We look for lines that are absolute paths and end with .jsonl
+mapfile -t PATH_LINES < <(echo "$python_output" | grep -E "^/" | grep "\.jsonl$" | xargs -I{} echo {} | head -2)
+
+if [[ ${#PATH_LINES[@]} -lt 2 ]]; then
+    log_error "❌ Failed to extract train/val paths from split_dataset.py output"
+    log_error "Expected 2 .jsonl paths, found ${#PATH_LINES[@]}"
+    rm -f "$TMP_PATHS"
+    exit 1
+fi
+
+TRAIN_PATH="${PATH_LINES[0]}"
+VAL_PATH="${PATH_LINES[1]}"
+
+# Validate that files exist
+if [[ ! -f "$TRAIN_PATH" ]]; then
+    log_error "❌ Train split file does not exist: $TRAIN_PATH"
+    rm -f "$TMP_PATHS"
+    exit 1
+fi
+
+if [[ ! -f "$VAL_PATH" ]]; then
+    log_error "❌ Validation split file does not exist: $VAL_PATH"
+    rm -f "$TMP_PATHS"
+    exit 1
+fi
+
+# Log final paths
+log_info "✅ Dataset split successfully"
+log_info "🧪 TRAIN_PATH (local): $TRAIN_PATH"
+log_info "🧪 VAL_PATH (local):   $VAL_PATH"
+
+# Clean up temp file
+rm -f "$TMP_PATHS"
+
+# =============================== Build Arguments ===============================
+# Megatron prefix shortcut 
+M="policy.megatron_cfg"
+
+# ==== Ensure only one parallelism backend is active ====
+if [[ "$MEGATRON_ENABLED" == "$TRUE" ]]; then
+    PARALLELISM_OVERRIDE=" policy.dtensor_cfg.enabled=false"
+else
+    PARALLELISM_OVERRIDE=" policy.megatron_cfg.enabled=false"
+fi
+
+# ==== Optimizer args ====
+OPTIM=""
+
+if [[ "$MEGATRON_ENABLED" == "$TRUE" ]]; then
+    # Use Megatron-native optimizer (not raw PyTorch)
+    case "$OPTIMIZER" in
+        "$ADAMW"|"adamw"|"torch.optim.AdamW")
+            MEGATRON_OPTIM="adam"  
+            ;;
+        "$ADAM"|"adam")
+            MEGATRON_OPTIM="adam"
+            ;;
+        "$SGD"|"sgd")
+            MEGATRON_OPTIM="sgd"
+            ;;
+        *)
+            log_error "Unsupported optimizer for Megatron: $OPTIMIZER"
+            exit 1
+            ;;
+    esac
+
+    OPTIM+=" policy.megatron_cfg.optimizer.optimizer=$MEGATRON_OPTIM"
+    OPTIM+=" policy.megatron_cfg.optimizer.adam_beta1=$ADAM_BETA1"
+    OPTIM+=" policy.megatron_cfg.optimizer.adam_beta2=$ADAM_BETA2"
+    OPTIM+=" policy.megatron_cfg.optimizer.adam_eps=$ADAM_EPS"
+    OPTIM+=" policy.megatron_cfg.optimizer.weight_decay=$WEIGHT_DECAY"
+    OPTIM+=" policy.megatron_cfg.optimizer.lr=$LR"
+else
+    # DTensor uses standard policy.optimizer
+    OPTIM+=" policy.optimizer.name=$OPTIMIZER"
+    OPTIM+=" policy.optimizer.kwargs.betas=$BETAS"
+    OPTIM+=" policy.optimizer.kwargs.eps=$EPS"
+    OPTIM+=" policy.optimizer.kwargs.lr=$LR"
+    OPTIM+=" policy.optimizer.kwargs.weight_decay=$WEIGHT_DECAY"
+fi
+
+# Dataset args function
+build_dataset_args() {
+    case "$DATASET_TYPE" in
+        "$PROMPT_DATASET")
+            echo " data.dataset_name=prompt_response_dataset"
+            echo " +data.train_data_path=$TRAIN_PATH"
+            echo " +data.val_data_path=$VAL_PATH"
+            echo " +data.input_key=prompt"
+            echo " +data.output_key=response"
+            ;;
+        "$OPENAI_DATASET")
+            echo " data.dataset_name=openai_format"
+            echo " +data.train_data_path=$TRAIN_PATH"
+            echo " +data.val_data_path=$VAL_PATH"
+            echo " +data.chat_key=messages"
+            echo " +data.system_key=null"
+            echo " +data.system_prompt=null"
+            ;;
+        "$OPEN_ASSISTANT_DATAST")
+            echo " data.dataset_name=open_assistant"
+            ;;
+        "$OPEN_MATH_INSTRUCT_DATASET")
+            echo " data.dataset_name=openmathinstruct2"
+            echo " +data.split=train"
+            echo " +data.output_key=output"
+            echo " +data.prompt_file=/path/to/openmathinstruct2/prompts.json"
+            ;;
+        *)
+            log_error "Unknown DATASET_TYPE: $DATASET_TYPE"
+            exit 1
+            ;;
+    esac
+}
+
+ARGS="+data.tokenized=$PRE_TOKENIZE $(build_dataset_args)"
+
+# =============================== NCCL Environment Setup ===============================
+# Add this section BEFORE the Ray startup
+
+# NCCL Communication Settings
+export NCCL_DEBUG=INFO                    # Enable detailed NCCL logging
+export NCCL_TIMEOUT_SEC=120              # 30 minutes timeout
+export NCCL_IB_DISABLE=1                  # Disable InfiniBand (often problematic)
+export NCCL_SOCKET_IFNAME=^docker,lo      # Exclude problematic interfaces
+export NCCL_P2P_DISABLE=1                 # Disable P2P if causing issues
+export NCCL_SHM_DISABLE=1                 # Disable shared memory if needed
+export NCCL_NET_GDR_LEVEL=0               # Disable GPU Direct RDMA
+export NCCL_NET_GDR_READ=0                # Disable GPU Direct RDMA reads
+
+# PyTorch Distributed Settings
+export TORCH_NCCL_TRACE_BUFFER_SIZE=10000 # Enable NCCL trace buffer
+export TORCH_NCCL_DUMP_ON_TIMEOUT=1       # Dump debug info on timeout
+export TORCH_DISTRIBUTED_DEBUG=INFO       # PyTorch distributed debugging
+
+# CUDA Settings
+export CUDA_VISIBLE_DEVICES=0,1,2,3       # Explicit GPU assignment
+export CUDA_DEVICE_ORDER=PCI_BUS_ID       # Consistent GPU ordering
+
+# Memory Management
+export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512,garbage_collection_threshold:0.6
+
+# =============================== Setup Cleanup Trap ===============================
+# =============================== Setup Cleanup Trap ===============================
+# Cleanup function
+cleanup() {
+    log_info "🧹 Cleaning up (signal received)..."
+    
+    # Stop Ray
+    if command -v ray &> /dev/null; then
+        uv run ray stop --force > /dev/null 2>&1 || true
+    fi
+    
+    # Kill any Ray processes
+    pkill -f "ray::" > /dev/null 2>&1 || true
+    
+    # Clean up temp directories
+    [[ -n "$SPLIT_DIR" && -d "$SPLIT_DIR" ]] && rm -rf "$SPLIT_DIR" || true
+    [[ -n "$RAY_TMP_DIR" && -d "$RAY_TMP_DIR" ]] && rm -rf "$RAY_TMP_DIR" || true
+    
+    log_info "✅ Cleanup completed"
+}
+
+# Set up signal traps for Ctrl+C (INT), kill (TERM), and script exit (EXIT)
+trap cleanup EXIT INT TERM
+
+log_info "🛡️ Signal handlers installed"
+
+# ========== Ray Start ==========
+log_info "🚀 Starting Ray cluster..."
+
+# Clean up any zombie processes
+uv run ray stop --force > /dev/null 2>&1 || true
+pkill -f "ray::" > /dev/null 2>&1 || true
+sleep 2
+
+# Start Ray with error handling
+log_info "▶️ Starting Ray head node..."
+if uv run ray start --head --disable-usage-stats --port=6379 --temp-dir="$RAY_TMP_DIR"; then
+    log_info "✅ Ray head started successfully"
+else
+    log_error "❌ Ray head failed to start"
+    exit 1
+fi
+
+# Wait a moment for Ray to fully initialize
+sleep 5
+
+# Verify Ray is running
+log_info "🔍 Verifying Ray status..."
+if uv run ray status --address=127.0.0.1:6379; then
+    log_info "✅ Ray cluster is active and ready"
+    export RAY_ADDRESS="127.0.0.1:6379"
+else
+    log_error "❌ Ray cluster verification failed"
+    log_info "🔧 Attempting to connect to default address..."
+    
+    # Try to find Ray's actual address
+    if uv run ray status; then
+        log_info "✅ Found Ray at default address"
+        # Don't export RAY_ADDRESS, let Ray auto-detect
+    else
+        log_error "❌ Cannot connect to Ray cluster"
+        log_error "🔧 Try running: uv run ray start --head --disable-usage-stats"
+        exit 1
+    fi
+fi
+
+log_info "🎯 Ray initialization complete"
+
+# ========== Ray Start ==========
+
+# Clean up any zombie processes
+uv run ray stop --force > /dev/null 2>&1 || true
+pkill -f "ray::" > /dev/null 2>&1 || true
+sleep 2
+
+log_info "🎯 Ray initialization complete"
+
+# =============================== Run Training ===============================
+log_info "▶️ Starting SFT training..."
+
 uv run python examples/run_sft.py \
     sft.max_num_epochs=${MAX_EPOCHS} \
     sft.max_num_steps=${MAX_STEPS} \
@@ -264,8 +420,6 @@ uv run python examples/run_sft.py \
     policy.dtensor_cfg.context_parallel_size=${CONTEXT_PARALLEL_SIZE} \
     policy.max_grad_norm=${MAX_GRAD_NORM} \
     $OPTIM \
-    policy.optimizer.kwargs.lr=$LR \
-    policy.optimizer.kwargs.weight_decay=$WEIGHT_DECAY \
     data.max_input_seq_length=${MAX_INPUT_SEQ_LENGTH} \
     $ARGS \
     logger.log_dir=$LOG_PWD \
@@ -281,32 +435,33 @@ uv run python examples/run_sft.py \
     policy.megatron_cfg.pipeline_model_parallel_size=${M_PIPELINE_PARALLEL_SIZE} \
     policy.megatron_cfg.context_parallel_size=${M_CONTEXT_PARALLEL_SIZE} \
     policy.megatron_cfg.pipeline_dtype=$PIPELINE_DTYPE \
-    +policy.megatron_cfg.num_layers_in_first_pipeline_stage=${NUM_LAYERS_FIRST:-null} \
-    +policy.megatron_cfg.num_layers_in_last_pipeline_stage=${NUM_LAYERS_LAST:-null} \
     policy.megatron_cfg.sequence_parallel=$SEQ_PARALLEL \
     policy.megatron_cfg.apply_rope_fusion=$ROPE_FUSION \
-    policy.megatron_cfg.optimizer.optimizer=$OPTIMIZER \
-    policy.megatron_cfg.optimizer.lr=$LR \
     policy.megatron_cfg.optimizer.min_lr=$MEGATRON_MIN_LR \
-    policy.megatron_cfg.optimizer.weight_decay=$WEIGHT_DECAY \
     policy.megatron_cfg.optimizer.params_dtype=$MEGATRON_PARAMS_DTYPE \
-    policy.megatron_cfg.optimizer.adam_beta1=$ADAM_BETA1 \
-    policy.megatron_cfg.optimizer.adam_beta2=$ADAM_BETA2 \
-    policy.megatron_cfg.optimizer.adam_eps=$EPS \
     policy.megatron_cfg.optimizer.sgd_momentum=$SGD_MOMENTUM \
     policy.megatron_cfg.optimizer.use_distributed_optimizer=$DISTRIBUTED_OPTIMIZER \
-    policy.megatron_cfg.optimizer.use_precision_aware_optimizer=$PRECISION_OPTIMIZER \
+    policy.megatron_cfg.optimizer.use_precision_aware_optimizer="$PRECISION_OPTIMIZER" \
     policy.megatron_cfg.optimizer.clip_grad=${CLIP_GRADIENTS} \
-    policy.megatron_cfg.scheduler.start_weight_decay=$WEIGHT_DECAY \
-    policy.megatron_cfg.scheduler.end_weight_decay=$WEIGHT_DECAY \
     policy.megatron_cfg.scheduler.weight_decay_incr_style=$WEIGHT_DECAY_STYLE \
     policy.megatron_cfg.scheduler.lr_decay_style=$LR_DECAY_STYLE \
-    +policy.megatron_cfg.scheduler.lr_decay_iters=$LR_DECAY_ITERS \
+    policy.megatron_cfg.scheduler.lr_decay_iters="$LR_DECAY_ITERS" \
     policy.megatron_cfg.scheduler.lr_warmup_iters=${LR_WARMUP_ITERS} \
     policy.megatron_cfg.scheduler.lr_warmup_init=$LR_WARMUP_INIT \
     policy.megatron_cfg.distributed_data_parallel_config.grad_reduce_in_fp32=$GRAD_REDUCE_FP32 \
     policy.megatron_cfg.distributed_data_parallel_config.overlap_grad_reduce=$OVERLAP_GRAD_REDUCE \
     policy.megatron_cfg.distributed_data_parallel_config.overlap_param_gather=$OVERLAP_PARAM_GATHER \
     policy.megatron_cfg.distributed_data_parallel_config.average_in_collective=$AVERAGE_IN_COLLECTIVE \
-    policy.megatron_cfg.distributed_data_parallel_config.data_parallel_sharding_strategy=$DP_SHARDING_STRATEGY 
-    
+    policy.megatron_cfg.distributed_data_parallel_config.data_parallel_sharding_strategy=$DP_SHARDING_STRATEGY \
+    $PARALLELISM_OVERRIDE 
+
+# Check training result
+TRAINING_EXIT_CODE=$?
+if [[ $TRAINING_EXIT_CODE -eq 0 ]]; then
+    log_info "🎉 Training completed successfully"
+else
+    log_error "❌ Training failed with exit code: $TRAINING_EXIT_CODE"
+fi
+
+# Exit (cleanup trap will run automatically)
+exit $TRAINING_EXIT_CODE

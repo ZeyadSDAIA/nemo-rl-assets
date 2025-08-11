@@ -1,4 +1,4 @@
-# SFT Algorithm Configuration
+#SFT Algorithm Configuration
 sft:
   ## total number of steps to train will equal
   ## min((max_num_epochs * len(train_dataloader)), max_num_steps)
@@ -19,9 +19,10 @@ checkpointing:
   higher_is_better: false # Whether higher values of the metric are better
   keep_top_k: 3 # Keep the top K checkpoints based on the monitored metric
   save_period: 10 # Save checkpoints every X steps
+  checkpoint_must_save_by: null # If set, will save checkpoints only if the metric is better than this value
 
 policy:
-  model_name: Qwen/Qwen3-0.6B # Name of the model to use
+  model_name: "Qwen/Qwen2.5-1.5B-Instruct" #Name of the model to use
   tokenizer:
     name: ${policy.model_name} # Tokenizer name
     chat_template: "/media/ExtremeSSD/models/models_chat_template/qwen2.5-0.5b-instruct_chat_template.txt"
@@ -46,6 +47,12 @@ policy:
   dynamic_batching:
     enabled: false # Enable dynamic batching
 
+  sequence_packing:
+    enabled: False
+    train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
+    algorithm: "modified_first_fit_decreasing"
+    sequence_length_round: 64
+
   # makes the training sequence length divisible by the tensor parallel size
   # this is useful for sequence parallel training
   make_sequence_length_divisible_by: ${policy.dtensor_cfg.tensor_parallel_size} # Ensures that sequence length is divisible by tensor parallel size for compatibilty
@@ -56,7 +63,7 @@ policy:
     kwargs:
       lr: 5.0e-6 # Learning rate
       weight_decay: 0.1 # L2 regularization
-      #betas: [0.9, 0.98] # Momentum for Adam(W)
+      #betas: [0.9, 0.98] # Momentum for AdamW
       #eps: 1e-5 # Epsilon for numerical stability
       # when using Dtensor, we need to set foreach
       # and fused to False
@@ -65,7 +72,7 @@ policy:
     
   ## ignored since enabled=false, but needed for testing purposes
   megatron_cfg:
-    enabled: false # Enables/disables megatron
+    enabled: true # Enables/disables megatron
     empty_unused_memory_level: 1 # Controls how aggressivley unused memory is freed
     activation_checkpointing: false # Disables activation checkpointing
     tensor_model_parallel_size: 2 # Parallelize via individual layers
@@ -75,6 +82,10 @@ policy:
     num_layers_in_first_pipeline_stage: null # Manually control how many layers are in the first pipeline stage. null = automatic
     num_layers_in_last_pipeline_stage: null # Manually control how many layers are in the last pipeline stage. null = automatic
     sequence_parallel: false
+    freeze_moe_router: false
+    moe_router_dtype: null
+    moe_router_load_balancing_type: "aux_loss"
+    moe_router_bias_update_rate: 1e-3
     #gives ~20% training perf speedup with sequence packing 
     apply_rope_fusion: True # Applies Rotatry Positional Embedding fusion  
 
@@ -120,21 +131,27 @@ policy:
     
 data:
   max_input_seq_length: ${policy.max_total_sequence_length} # Max sequence length before truncation
-  dataset_name: "test_data" # Name of dataset
+  dataset_name: "oasst" # Name of dataset
   add_bos: true # Adds beginning of sequence token
   add_eos: true # Adds end of sequence token
   add_generation_prompt: false # Adds generation prompt to the input
+  shuffle: true
 
 logger:
   log_dir: "logs"  # Base directory for all logs
   wandb_enabled: false # Make sure you do a ``wandb login [Your API key]'' before running
   tensorboard_enabled: true
+  mlflow_enabled: false
   monitor_gpus: true  # If true, will monitor GPU usage and log to wandb and/or tensorboard
+  num_val_samples_to_print: 0  # Number of validation samples to pretty print on terminal
   wandb:
     project: "sft-dev" # WandB project name
     name: "sft-dev-${data.dataset_name}" # WandB run name
   tensorboard:
     log_dir: "tb_logs-sft-dev-${data.dataset_name}" # TensorBoard log directory
+  mlflow:
+    experiment_name: "sft-dev"
+    run_name: "sft-dev-${data.dataset_name}"
   gpu_monitoring:
     collection_interval: 10  # How often to collect GPU usage metrics (in seconds)
     flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
